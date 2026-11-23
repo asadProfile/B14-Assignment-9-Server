@@ -58,13 +58,14 @@ app.get(['/health', '/api/health'], (_req, res) => {
   });
 });
 
-// Root check endpoint
-app.get('/', (_req, res) => {
+// Root check endpoint (supports both / and /api)
+app.get(['/', '/api'], (_req, res) => {
   res.json({
     name: 'SalonBook API',
     status: 'online',
     version: '1.0.0',
     documentation: '/health',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
   });
 });
 

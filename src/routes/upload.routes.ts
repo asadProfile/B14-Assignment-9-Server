@@ -1,26 +1,12 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import { AuthRequest, verifyToken, verifyNotBlocked } from '../middlewares/auth.js';
 
 const router = Router();
 
-// Configure local upload storage fallback
-const uploadsDir = path.resolve('public', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  },
-});
+// In serverless environments (e.g. Vercel), local filesystem is read-only.
+// Using multer memoryStorage keeps the file in memory buffer for cloud upload.
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -46,8 +32,7 @@ router.post('/', verifyToken, verifyNotBlocked, upload.single('image'), async (r
 
     if (imgbbApiKey && imgbbApiKey.trim() !== '') {
       // Upload to ImgBB
-      const fileBuffer = fs.readFileSync(req.file.path);
-      const base64Image = fileBuffer.toString('base64');
+      const base64Image = req.file.buffer.toString('base64');
 
       const formData = new URLSearchParams();
       formData.append('image', base64Image);
@@ -59,9 +44,6 @@ router.post('/', verifyToken, verifyNotBlocked, upload.single('image'), async (r
 
       const data: any = await response.json();
 
-      // Clean up local file after uploading to ImgBB
-      fs.unlinkSync(req.file.path);
-
       if (data.success) {
         res.json({
           success: true,
@@ -72,13 +54,11 @@ router.post('/', verifyToken, verifyNotBlocked, upload.single('image'), async (r
       }
     }
 
-    // Fallback: Serve local static file
-    const publicUrl = process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`;
-    const fileUrl = `${publicUrl}/uploads/${req.file.filename}`;
-
+    // Fallback: If no ImgBB API key, return a data URI representation
+    const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
     res.json({
       success: true,
-      url: fileUrl,
+      url: base64Data,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message || 'Image upload failed.' });
