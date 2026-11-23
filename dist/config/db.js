@@ -5,10 +5,21 @@ export const connectDB = async () => {
         return;
     }
     try {
-        let mongoUri = process.env.MONGODB_URI;
+        // Check MONGODB_URI, Vercel Integration MONGODB_1_MONGODB_URI, or any MONGODB_*_URI
+        let mongoUri = process.env.MONGODB_URI ||
+            process.env.MONGODB_1_MONGODB_URI ||
+            process.env.DATABASE_URL;
+        if (!mongoUri || mongoUri.trim() === '') {
+            for (const [key, value] of Object.entries(process.env)) {
+                if (key.startsWith('MONGODB') && key.endsWith('URI') && value && value.trim() !== '') {
+                    mongoUri = value;
+                    break;
+                }
+            }
+        }
         if (!mongoUri || mongoUri.trim() === '') {
             if (process.env.VERCEL) {
-                throw new Error('MONGODB_URI environment variable is required on Vercel. Please add your MongoDB Atlas connection string in Vercel Project Settings > Environment Variables.');
+                throw new Error('MONGODB_URI or MONGODB_1_MONGODB_URI is required on Vercel. Please add or check your MongoDB Atlas connection string in Vercel Project Settings > Environment Variables.');
             }
             console.log('⚡ No MONGODB_URI found. Initializing in-memory MongoDB for local development...');
             const { MongoMemoryServer } = await import('mongodb-memory-server');

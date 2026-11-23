@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     res.end(
       JSON.stringify({
         success: false,
-        message: 'The API could not reach its database. Please verify MONGODB_URI in Vercel Environment Variables.',
+        message: 'The API could not reach its database. Please verify MONGODB_URI or MONGODB_1_MONGODB_URI in Vercel Environment Variables.',
         error: error.message,
       })
     );
