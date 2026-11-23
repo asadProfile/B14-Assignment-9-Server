@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 
-let mongod: MongoMemoryServer | null = null;
+let mongod: any = null;
 
 export const connectDB = async (): Promise<void> => {
   if (mongoose.connection.readyState >= 1) {
@@ -13,21 +12,26 @@ export const connectDB = async (): Promise<void> => {
 
     if (!mongoUri || mongoUri.trim() === '') {
       if (process.env.VERCEL) {
-        throw new Error('MONGODB_URI is required when deploying on Vercel (MongoDB Atlas).');
+        throw new Error(
+          'MONGODB_URI environment variable is required on Vercel. Please add your MongoDB Atlas connection string in Vercel Project Settings > Environment Variables.'
+        );
       }
       console.log('⚡ No MONGODB_URI found. Initializing in-memory MongoDB for local development...');
+      const { MongoMemoryServer } = await import('mongodb-memory-server');
       mongod = await MongoMemoryServer.create();
       mongoUri = mongod.getUri();
       console.log(`✅ In-memory MongoDB started at: ${mongoUri}`);
     }
 
-    await mongoose.connect(mongoUri, {
+    mongoose.set('strictQuery', true);
+    await mongoose.connect(mongoUri!, {
       dbName: process.env.DB_NAME || 'salonbook',
+      serverSelectionTimeoutMS: 10000,
     });
 
     console.log(`🚀 Connected to MongoDB: ${mongoose.connection.host}/${mongoose.connection.name}`);
-  } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
+  } catch (error: any) {
+    console.error('❌ MongoDB connection error:', error.message);
     if (!process.env.VERCEL) {
       process.exit(1);
     }

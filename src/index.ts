@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import mongoose from 'mongoose';
 import { connectDB } from './config/db.js';
 import { seedDatabase } from './scripts/seed.js';
 import authRoutes from './routes/auth.routes.js';
@@ -46,12 +47,14 @@ app.use(express.urlencoded({ extended: true }));
 const uploadsDir = path.resolve('public', 'uploads');
 app.use('/uploads', express.static(uploadsDir));
 
-// Health check endpoint
-app.get('/health', (_req, res) => {
+// Health check endpoint (supports both /health and /api/health)
+app.get(['/health', '/api/health'], (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'SalonBook API',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'connecting_or_disconnected',
+    environment: process.env.VERCEL ? 'vercel-serverless' : (process.env.NODE_ENV || 'development'),
   });
 });
 
