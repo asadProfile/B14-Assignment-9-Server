@@ -134,10 +134,132 @@ router.post('/login', async (req, res: Response): Promise<void> => {
   }
 });
 
-// POST /api/auth/google
+// GET /api/auth/google/url - Get Google OAuth consent screen URL if credentials configured
+router.get('/google/url', (_req, res: Response): void => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId || clientId.trim() === '') {
+    res.json({
+      success: false,
+      configured: false,
+      message: 'Google OAuth credentials not configured on server.',
+    });
+    return;
+  }
+
+  const callbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+  const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+  const options = {
+    redirect_uri: callbackUrl,
+    client_id: clientId,
+    access_type: 'offline',
+    response_type: 'code',
+    prompt: 'consent',
+    scope: [
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email',
+    ].join(' '),
+  };
+
+  const qs = new URLSearchParams(options);
+  res.json({
+    success: true,
+    configured: true,
+    url: `${rootUrl}?${qs.toString()}`,
+  });
+});
+
+// GET /api/auth/google/callback - Handle Google OAuth redirect callback
+router.get('/google/callback', async (req, res: Response): Promise<void> => {
+  const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+  const { code } = req.query;
+
+  if (!code || typeof code !== 'string') {
+    res.redirect(`${clientUrl}/signin?error=Google+login+cancelled`);
+    return;
+  }
+
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const callbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+
+    // Exchange code for tokens
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId || '',
+        client_secret: clientSecret || '',
+        redirect_uri: callbackUrl,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    const tokenData: any = await tokenResponse.json();
+
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error('Failed to exchange Google OAuth code:', tokenData);
+      res.redirect(`${clientUrl}/signin?error=Failed+to+exchange+Google+authorization+code`);
+      return;
+    }
+
+    // Fetch user profile from Google
+    const userinfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+
+    const googleUser: any = await userinfoResponse.json();
+
+    if (!googleUser.email) {
+      res.redirect(`${clientUrl}/signin?error=Could+not+retrieve+email+from+Google`);
+      return;
+    }
+
+    let user = await User.findOne({ email: googleUser.email.toLowerCase() });
+
+    if (!user) {
+      user = await User.create({
+        name: googleUser.name || 'Google User',
+        email: googleUser.email.toLowerCase(),
+        image: googleUser.picture || undefined,
+        role: 'customer',
+        isBlocked: false,
+      });
+    }
+
+    if (user.isBlocked) {
+      res.redirect(`${clientUrl}/signin?error=Your+account+has+been+suspended`);
+      return;
+    }
+
+    const token = generateToken(user);
+    res.redirect(`${clientUrl}/signin?token=${token}`);
+  } catch (err: any) {
+    console.error('Error during Google OAuth callback:', err);
+    res.redirect(`${clientUrl}/signin?error=Google+authentication+failed`);
+  }
+});
+
+// POST /api/auth/google - Authenticate via Google ID token or profile payload
 router.post('/google', async (req, res: Response): Promise<void> => {
   try {
-    const { email, name, image } = req.body;
+    let { email, name, image, credential } = req.body;
+
+    // If Google ID token credential provided, verify via Google TokenInfo API
+    if (credential) {
+      try {
+        const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+        const tokenInfo: any = await verifyRes.json();
+        if (verifyRes.ok && tokenInfo.email) {
+          email = tokenInfo.email;
+          name = tokenInfo.name || name;
+          image = tokenInfo.picture || image;
+        }
+      } catch (e) {
+        console.error('Error verifying Google ID token:', e);
+      }
+    }
 
     if (!email || !name) {
       res.status(400).json({ success: false, message: 'Google authentication details missing.' });
