@@ -25,7 +25,7 @@ const allowedOrigins = process.env.CLIENT_URL
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production' || process.env.VERCEL) {
         callback(null, true);
       } else {
         callback(null, true); // Permissive for preview/production domains
@@ -55,6 +55,16 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// Root check endpoint
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'SalonBook API',
+    status: 'online',
+    version: '1.0.0',
+    documentation: '/health',
+  });
+});
+
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/services', serviceRoutes);
@@ -78,7 +88,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   });
 });
 
-// Start Server and Connect DB
+// Start Server locally when not on Vercel
 const startServer = async () => {
   try {
     await connectDB();
@@ -96,4 +106,9 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export { app };
+export default app;

@@ -4,10 +4,17 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 let mongod: MongoMemoryServer | null = null;
 
 export const connectDB = async (): Promise<void> => {
+  if (mongoose.connection.readyState >= 1) {
+    return;
+  }
+
   try {
     let mongoUri = process.env.MONGODB_URI;
 
     if (!mongoUri || mongoUri.trim() === '') {
+      if (process.env.VERCEL) {
+        throw new Error('MONGODB_URI is required when deploying on Vercel (MongoDB Atlas).');
+      }
       console.log('⚡ No MONGODB_URI found. Initializing in-memory MongoDB for local development...');
       mongod = await MongoMemoryServer.create();
       mongoUri = mongod.getUri();
@@ -21,7 +28,10 @@ export const connectDB = async (): Promise<void> => {
     console.log(`🚀 Connected to MongoDB: ${mongoose.connection.host}/${mongoose.connection.name}`);
   } catch (error) {
     console.error('❌ MongoDB connection error:', error);
-    process.exit(1);
+    if (!process.env.VERCEL) {
+      process.exit(1);
+    }
+    throw error;
   }
 };
 
