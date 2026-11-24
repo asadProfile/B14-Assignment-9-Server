@@ -114,8 +114,21 @@ router.post('/login', async (req, res) => {
         res.status(500).json({ success: false, message: error.message || 'Login failed.' });
     }
 });
+// Helper to get the canonical Google OAuth callback URL
+const getGoogleCallbackUrl = (req) => {
+    if (process.env.GOOGLE_CALLBACK_URL) {
+        if (process.env.VERCEL && process.env.GOOGLE_CALLBACK_URL.includes('localhost')) {
+            return 'https://b14-a9-server-plum.vercel.app/api/auth/google/callback';
+        }
+        return process.env.GOOGLE_CALLBACK_URL;
+    }
+    if (process.env.VERCEL) {
+        return 'https://b14-a9-server-plum.vercel.app/api/auth/google/callback';
+    }
+    return 'http://localhost:5000/api/auth/google/callback';
+};
 // GET /api/auth/google/url - Get Google OAuth consent screen URL if credentials configured
-router.get('/google/url', (_req, res) => {
+router.get('/google/url', (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId || clientId.trim() === '') {
         res.json({
@@ -125,7 +138,8 @@ router.get('/google/url', (_req, res) => {
         });
         return;
     }
-    const callbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+    const callbackUrl = getGoogleCallbackUrl(req);
+    const clientUrl = req.query.client_url || (req.headers.referer ? new URL(req.headers.referer).origin : '');
     const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
     const options = {
         redirect_uri: callbackUrl,
@@ -138,16 +152,22 @@ router.get('/google/url', (_req, res) => {
             'https://www.googleapis.com/auth/userinfo.email',
         ].join(' '),
     };
+    if (clientUrl && clientUrl.startsWith('http')) {
+        options.state = clientUrl;
+    }
     const qs = new URLSearchParams(options);
     res.json({
         success: true,
         configured: true,
+        callbackUrl,
         url: `${rootUrl}?${qs.toString()}`,
     });
 });
 // GET /api/auth/google/callback - Handle Google OAuth redirect callback
 router.get('/google/callback', async (req, res) => {
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+    const requestedClientUrl = req.query.state || '';
+    const fallbackClientUrl = process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',')[0].trim() : (process.env.VERCEL ? 'https://b14-a9-client-theta.vercel.app' : 'http://localhost:3000');
+    const clientUrl = (requestedClientUrl && requestedClientUrl.startsWith('http')) ? requestedClientUrl : fallbackClientUrl;
     const { code } = req.query;
     if (!code || typeof code !== 'string') {
         res.redirect(`${clientUrl}/signin?error=Google+login+cancelled`);
@@ -156,7 +176,7 @@ router.get('/google/callback', async (req, res) => {
     try {
         const clientId = process.env.GOOGLE_CLIENT_ID;
         const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-        const callbackUrl = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/auth/google/callback';
+        const callbackUrl = getGoogleCallbackUrl(req);
         // Exchange code for tokens
         const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
