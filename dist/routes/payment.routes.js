@@ -41,7 +41,11 @@ router.post('/create-checkout-session', verifyToken, verifyNotBlocked, verifyCus
             res.status(400).json({ success: false, message: 'This appointment has already been paid.' });
             return;
         }
-        const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+        const originHeader = req.headers.origin;
+        const fallbackClientUrl = process.env.CLIENT_URL
+            ? process.env.CLIENT_URL.split(',')[0].trim()
+            : (process.env.VERCEL ? 'https://b14-a9-client-theta.vercel.app' : 'http://localhost:3000');
+        const clientUrl = originHeader && originHeader.startsWith('http') ? originHeader : fallbackClientUrl;
         const service = appointment.serviceId;
         const stripe = getStripe();
         const session = await stripe.checkout.sessions.create({
@@ -179,6 +183,29 @@ router.post('/sync-session', verifyToken, verifyNotBlocked, async (req, res) => 
     }
     catch (error) {
         res.status(500).json({ success: false, message: error.message || 'Failed to sync session.' });
+    }
+});
+// GET /api/payments/my-transactions - Customer only: View own payment history
+router.get('/my-transactions', verifyToken, verifyNotBlocked, verifyCustomer, async (req, res) => {
+    try {
+        const customerId = req.user._id;
+        const transactions = await Transaction.find({ customerId })
+            .populate({
+            path: 'appointmentId',
+            populate: {
+                path: 'serviceId',
+                select: 'serviceName category price duration',
+            },
+        })
+            .sort({ createdAt: -1 });
+        res.json({
+            success: true,
+            count: transactions.length,
+            data: transactions,
+        });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, message: error.message || 'Failed to fetch your payment history.' });
     }
 });
 // GET /api/payments/transactions - Admin only: View all transactions
